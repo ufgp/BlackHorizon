@@ -289,7 +289,7 @@ def portal():
           <form method="POST" action="/portal">
             <div class="form-row">
               <label>Your Discord User ID</label>
-              <input type="text" name="discord_id" placeholder="e.g. 783700235943018507">
+              <input type="text" name="discord_id" placeholder="e.g. `XXXXXXXXXXXXXXXXXX`">
             </div>
             <button class="btn btn-primary" type="submit" style="width:100%;justify-content:center">
               Retrieve Key
