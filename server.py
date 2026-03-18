@@ -4,8 +4,6 @@ import uuid
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify, session, redirect
-from markupsafe import Markup
-
 from pathlib import Path
 
 env_path = Path(__file__).parent / "login_info"
@@ -15,9 +13,10 @@ app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
-
+DISCORD_TAG    = "cbdinmycart"
 
 DB = "licenses.db"
+
 
 def init_db():
     with sqlite3.connect(DB) as con:
@@ -28,7 +27,8 @@ def init_db():
                 activated  INTEGER DEFAULT 0,
                 key_type   TEXT DEFAULT 'lifetime',
                 expires_at TEXT,
-                created_at TEXT
+                created_at TEXT,
+                discord_id TEXT
             )
         """)
         con.execute("""
@@ -41,6 +41,12 @@ def init_db():
                 notes      TEXT
             )
         """)
+        # migrate existing db if discord_id column missing
+        try:
+            con.execute("ALTER TABLE licenses ADD COLUMN discord_id TEXT")
+            con.commit()
+        except:
+            pass
         con.commit()
 
 
@@ -60,9 +66,9 @@ def login_required(f):
 
 def badge(key_type):
     mapping = {
-        "lifetime": ("badge-life",  "Lifetime"),
-        "30days":   ("badge-30",    "30 Days"),
-        "90days":   ("badge-90",    "90 Days"),
+        "lifetime": ("badge-life", "Lifetime"),
+        "30days":   ("badge-30",   "30 Days"),
+        "90days":   ("badge-90",   "90 Days"),
     }
     cls, label = mapping.get(key_type, ("badge-life", key_type))
     return f'<span class="badge {cls}">{label}</span>'
@@ -105,7 +111,7 @@ a{color:inherit;text-decoration:none}
 .stat-val{font-family:'Syne',sans-serif;font-size:30px;font-weight:800;color:var(--accent)}
 .stat-label{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.1em;margin-top:4px}
 
-.table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:3px;overflow:hidden}
+.table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:3px;overflow:hidden;overflow-x:auto}
 table{width:100%;border-collapse:collapse}
 th{text-align:left;padding:12px 18px;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);border-bottom:1px solid var(--border);background:rgba(255,255,255,.01)}
 td{padding:13px 18px;border-bottom:1px solid var(--border);vertical-align:middle}
@@ -128,11 +134,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--accent)}
 select option{background:var(--surface)}
 textarea{resize:vertical;min-height:80px}
 
-.btn{display:inline-flex;align-items:center;gap:8px;padding:10px 22px;font-family:'Space Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.04em;border:none;cursor:pointer;border-radius:3px;transition:all .15s}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:10px 22px;font-family:'Space Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.04em;border:none;cursor:pointer;border-radius:3px;transition:all .15s;text-decoration:none}
 .btn-primary{background:var(--accent);color:#000}
 .btn-primary:hover{background:#d4ff1a}
 .btn-danger{background:transparent;border:1px solid var(--red);color:var(--red);font-size:11px;padding:5px 12px}
 .btn-danger:hover{background:rgba(255,60,60,.1)}
+.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--muted);font-size:12px}
+.btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
 
 .flash{padding:12px 18px;border-radius:3px;margin-bottom:24px;font-size:12px}
 .flash-ok{background:rgba(200,255,0,.07);border:1px solid rgba(200,255,0,.2);color:var(--accent)}
@@ -146,18 +154,42 @@ textarea{resize:vertical;min-height:80px}
 .login-box{width:360px}
 .login-logo{font-family:'Syne',sans-serif;font-weight:800;font-size:34px;color:var(--accent);margin-bottom:6px;letter-spacing:-2px}
 .login-sub{color:var(--muted);font-size:11px;margin-bottom:28px}
+.divider{height:1px;background:var(--border);margin:20px 0}
+
+.public-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:40px 20px}
+.public-box{width:100%;max-width:580px}
+.public-logo{font-family:'Syne',sans-serif;font-weight:800;font-size:40px;color:var(--accent);letter-spacing:-2px;margin-bottom:4px}
+.public-sub{color:var(--muted);font-size:12px;margin-bottom:36px}
+.info-card{background:var(--surface);border:1px solid var(--border);border-radius:3px;padding:28px;margin-bottom:20px}
+.info-card-title{font-family:'Syne',sans-serif;font-weight:700;font-size:14px;margin-bottom:16px}
+.pricing-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}
+.price-card{background:var(--bg);border:1px solid var(--border);border-radius:3px;padding:16px;text-align:center}
+.price-card.featured{border-color:var(--accent)}
+.price-name{font-family:'Syne',sans-serif;font-weight:700;font-size:13px;margin-bottom:6px}
+.price-val{font-size:22px;font-weight:700;color:var(--accent);font-family:'Syne',sans-serif}
+.price-desc{color:var(--muted);font-size:10px;margin-top:4px}
+.discord-tag{display:inline-flex;align-items:center;gap:8px;background:rgba(88,101,242,.15);border:1px solid rgba(88,101,242,.3);color:#8b9cf4;padding:10px 16px;border-radius:3px;font-size:13px;margin-top:12px}
+.key-result-item{margin-bottom:10px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:3px}
+.key-val{color:var(--accent);font-size:14px;font-weight:700;margin-bottom:6px;word-break:break-all;font-family:'Space Mono',monospace}
 </style>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 """
 
 
-def page(title, body, active=""):
+def wrap_page(title, body, sidebar=True, active=""):
+    if not sidebar:
+        return f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Black Horizon — {title}</title>{CSS}</head>
+<body>{body}</body></html>"""
+
     nav_links = [
-        ("/",            "dashboard", "◈", "Dashboard"),
-        ("/keys",        "keys",      "⌗", "Keys"),
-        ("/generate",    "generate",  "+", "Generate Key"),
-        ("/orders",      "orders",    "▤", "Orders"),
-        ("/orders/new",  "new_order", "✦", "New Order"),
+        ("/",           "dashboard", "◈", "Dashboard"),
+        ("/keys",       "keys",      "⌗", "Keys"),
+        ("/generate",   "generate",  "+", "Generate Key"),
+        ("/orders",     "orders",    "▤", "Orders"),
+        ("/orders/new", "new_order", "✦", "New Order"),
     ]
     nav_html = ""
     for href, name, icon, label in nav_links:
@@ -180,35 +212,125 @@ def page(title, body, active=""):
 </body></html>"""
 
 
-def login_page(error=""):
-    err_html = f'<div class="flash flash-err">{error}</div>' if error else ""
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><title>Black Horizon — Login</title>{CSS}</head>
-<body>
-<div class="login-wrap">
-  <div class="login-box">
-    <div class="login-logo">Black Horizon.</div>
-    <div class="login-sub">License Management Panel</div>
-    {err_html}
-    <form method="POST">
-      <div class="form-row"><label>Username</label><input type="text" name="username" autofocus></div>
-      <div class="form-row"><label>Password</label><input type="password" name="password"></div>
-      <button class="btn btn-primary" style="width:100%;justify-content:center" type="submit">Enter Panel</button>
-    </form>
-  </div>
-</div>
-</body></html>"""
+# ── PUBLIC PORTAL ─────────────────────────────────────────────────────────────
+@app.route("/portal", methods=["GET", "POST"])
+def portal():
+    result_html = ""
+
+    if request.method == "POST":
+        discord_id = request.form.get("discord_id", "").strip()
+        if discord_id:
+            with get_db() as con:
+                rows = con.execute(
+                    "SELECT key, key_type, activated, expires_at FROM licenses WHERE discord_id = ?",
+                    (discord_id,)
+                ).fetchall()
+            if rows:
+                items = ""
+                for r in rows:
+                    exp = r[3] if r[3] else "Never"
+                    act = "✅ Activated" if r[2] else "⏳ Not yet activated"
+                    items += f"""
+                    <div class="key-result-item">
+                      <div class="key-val">{r[0]}</div>
+                      <div style="color:var(--muted);font-size:11px;margin-top:4px">
+                        {badge(r[1])} &nbsp;&nbsp; {act} &nbsp;·&nbsp; Expires: {exp}
+                      </div>
+                    </div>"""
+                result_html = f'<div class="flash flash-ok" style="margin-top:20px">Found {len(rows)} key(s) linked to your account.</div>{items}'
+            else:
+                result_html = '<div class="flash flash-err" style="margin-top:20px">No keys found for that Discord ID. Contact cbdinmycart on Discord if you believe this is an error.</div>'
+        else:
+            result_html = '<div class="flash flash-err" style="margin-top:20px">Please enter your Discord User ID.</div>'
+
+    body = f"""
+    <div class="public-wrap">
+      <div class="public-box">
+        <div class="public-logo">Black Horizon.</div>
+        <div class="public-sub">Customer Portal</div>
+
+        <div class="info-card">
+          <div class="info-card-title">💰 Purchase a License</div>
+          <p style="color:var(--muted);font-size:12px;line-height:1.9;margin-bottom:20px">
+            To purchase a license, contact us on Discord. Once payment is confirmed your key
+            will be sent directly to you. Please provide your Discord User ID when purchasing
+            so your key can be linked to your account.
+          </p>
+          <div class="pricing-grid">
+            <div class="price-card">
+              <div class="price-name">30 Days</div>
+              <div class="price-val">£5</div>
+              <div class="price-desc">30 day access</div>
+            </div>
+            <div class="price-card">
+              <div class="price-name">90 Days</div>
+              <div class="price-val">£10</div>
+              <div class="price-desc">90 day access</div>
+            </div>
+            <div class="price-card featured">
+              <div class="price-name">Lifetime ✦</div>
+              <div class="price-val">£20</div>
+              <div class="price-desc">Permanent access</div>
+            </div>
+          </div>
+          <div style="color:var(--muted);font-size:11px;margin-bottom:8px">Contact on Discord to buy:</div>
+          <div class="discord-tag">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="#8b9cf4"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03z"/></svg>
+            cbdinmycart
+          </div>
+        </div>
+
+        <div class="info-card">
+          <div class="info-card-title">🔑 Retrieve Your Key</div>
+          <p style="color:var(--muted);font-size:12px;line-height:1.9;margin-bottom:20px">
+            Already purchased? Enter your Discord User ID to retrieve your license key.<br>
+            <span style="color:var(--muted)">To find your User ID: Discord Settings → Advanced → enable Developer Mode → right-click your username → Copy ID.</span>
+          </p>
+          <form method="POST" action="/portal">
+            <div class="form-row">
+              <label>Your Discord User ID</label>
+              <input type="text" name="discord_id" placeholder="e.g. 783700235943018507">
+            </div>
+            <button class="btn btn-primary" type="submit" style="width:100%;justify-content:center">
+              Retrieve Key
+            </button>
+          </form>
+          {result_html}
+        </div>
+
+      </div>
+    </div>"""
+
+    return wrap_page("Customer Portal", body, sidebar=False)
 
 
+# ── AUTH ──────────────────────────────────────────────────────────────────────
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    error = ""
     if request.method == "POST":
         if request.form.get("username") == ADMIN_USERNAME and request.form.get("password") == ADMIN_PASSWORD:
             session["logged_in"] = True
             return redirect("/")
-        return login_page("Invalid credentials.")
-    return login_page()
+        error = "Invalid credentials."
+
+    err_html = f'<div class="flash flash-err">{error}</div>' if error else ""
+    body = f"""
+    <div class="login-wrap">
+      <div class="login-box">
+        <div class="login-logo">Black Horizon.</div>
+        <div class="login-sub">License Management Panel</div>
+        {err_html}
+        <form method="POST" action="/login">
+          <div class="form-row"><label>Username</label><input type="text" name="username" autofocus></div>
+          <div class="form-row"><label>Password</label><input type="password" name="password"></div>
+          <button class="btn btn-primary" style="width:100%;justify-content:center" type="submit">Enter Panel</button>
+        </form>
+        <div class="divider"></div>
+        <a href="/portal" class="btn btn-ghost" style="width:100%;justify-content:center">Customer Portal →</a>
+      </div>
+    </div>"""
+    return wrap_page("Login", body, sidebar=False)
 
 
 @app.route("/logout")
@@ -217,6 +339,7 @@ def logout():
     return redirect("/login")
 
 
+# ── DASHBOARD ─────────────────────────────────────────────────────────────────
 @app.route("/")
 @login_required
 def dashboard():
@@ -244,6 +367,7 @@ def dashboard():
     body = f"""
     <div class="page-header">
       <div><div class="page-title">Dashboard <span>↗</span></div><div class="page-sub">Overview of your license panel</div></div>
+      <a href="/portal" class="btn btn-ghost" target="_blank">Customer Portal ↗</a>
     </div>
     <div class="stats">
       <div class="stat"><div class="stat-val">{total_keys}</div><div class="stat-label">Total Keys</div></div>
@@ -267,20 +391,24 @@ def dashboard():
         </table></div>
       </div>
     </div>"""
-    return page("Dashboard", body, "dashboard")
+    return wrap_page("Dashboard", body, active="dashboard")
 
 
+# ── KEYS ──────────────────────────────────────────────────────────────────────
 @app.route("/keys")
 @login_required
 def keys():
     with get_db() as con:
-        rows = con.execute("SELECT key, key_type, activated, hwid, created_at, expires_at FROM licenses ORDER BY created_at DESC").fetchall()
+        rows = con.execute(
+            "SELECT key, key_type, activated, hwid, created_at, expires_at, discord_id FROM licenses ORDER BY created_at DESC"
+        ).fetchall()
 
     rows_html = ""
     for r in rows:
-        act  = '<span class="badge badge-yes">Yes</span>' if r[2] else '<span class="badge badge-no">No</span>'
-        hwid = f'<span style="color:var(--muted);font-size:10px">{r[3][:20]}…</span>' if r[3] else '<span style="color:var(--muted)">—</span>'
-        exp  = r[5] if r[5] else "Never"
+        act        = '<span class="badge badge-yes">Yes</span>' if r[2] else '<span class="badge badge-no">No</span>'
+        hwid       = f'<span style="color:var(--muted);font-size:10px">{r[3][:16]}…</span>' if r[3] else '<span style="color:var(--muted)">—</span>'
+        exp        = r[5] if r[5] else "Never"
+        discord_id = r[6] or ""
         rows_html += f"""<tr>
           <td class="mono">{r[0]}</td>
           <td>{badge(r[1])}</td>
@@ -288,15 +416,22 @@ def keys():
           <td>{hwid}</td>
           <td style="color:var(--muted)">{r[4] or '—'}</td>
           <td style="color:var(--muted)">{exp}</td>
+          <td style="color:var(--muted)">{discord_id or '—'}</td>
           <td>
-            <form method="POST" action="/keys/revoke" style="display:inline">
+            <form method="POST" action="/keys/revoke" style="display:inline;margin-right:6px">
               <input type="hidden" name="key" value="{r[0]}">
               <button class="btn btn-danger" onclick="return confirm('Revoke this key?')">Revoke</button>
+            </form>
+            <form method="POST" action="/keys/link" style="display:inline-flex;gap:4px;align-items:center">
+              <input type="hidden" name="key" value="{r[0]}">
+              <input type="text" name="discord_id" placeholder="Discord ID" value="{discord_id}"
+                style="width:130px;padding:5px 8px;font-size:11px">
+              <button class="btn btn-primary" style="padding:5px 10px;font-size:11px" type="submit">Link</button>
             </form>
           </td>
         </tr>"""
     if not rows_html:
-        rows_html = "<tr><td colspan='7' class='empty'>No keys generated yet.</td></tr>"
+        rows_html = "<tr><td colspan='8' class='empty'>No keys generated yet.</td></tr>"
 
     body = f"""
     <div class="page-header">
@@ -304,10 +439,10 @@ def keys():
       <a href="/generate" class="btn btn-primary">+ Generate Key</a>
     </div>
     <div class="table-wrap"><table>
-      <tr><th>Key</th><th>Type</th><th>Activated</th><th>HWID</th><th>Created</th><th>Expires</th><th></th></tr>
+      <tr><th>Key</th><th>Type</th><th>Activated</th><th>HWID</th><th>Created</th><th>Expires</th><th>Discord ID</th><th>Actions</th></tr>
       {rows_html}
     </table></div>"""
-    return page("Keys", body, "keys")
+    return wrap_page("Keys", body, active="keys")
 
 
 @app.route("/keys/revoke", methods=["POST"])
@@ -320,15 +455,28 @@ def revoke_key():
     return redirect("/keys")
 
 
+@app.route("/keys/link", methods=["POST"])
+@login_required
+def link_discord():
+    key        = request.form.get("key", "").strip()
+    discord_id = request.form.get("discord_id", "").strip()
+    with get_db() as con:
+        con.execute("UPDATE licenses SET discord_id=? WHERE key=?", (discord_id, key))
+        con.commit()
+    return redirect("/keys")
+
+
+# ── GENERATE ──────────────────────────────────────────────────────────────────
 @app.route("/generate", methods=["GET", "POST"])
 @login_required
 def generate():
     flash_html = ""
     if request.method == "POST":
-        key_type = request.form.get("key_type", "lifetime")
-        raw      = uuid.uuid4().hex.upper()
-        key      = f"{raw[:5]}-{raw[5:10]}-{raw[10:15]}-{raw[15:20]}"
-        now      = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        key_type   = request.form.get("key_type", "lifetime")
+        discord_id = request.form.get("discord_id", "").strip() or None
+        raw        = uuid.uuid4().hex.upper()
+        key        = f"{raw[:5]}-{raw[5:10]}-{raw[10:15]}-{raw[15:20]}"
+        now        = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         if key_type == "30days":
             expires = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
@@ -339,12 +487,16 @@ def generate():
 
         with get_db() as con:
             con.execute(
-                "INSERT INTO licenses (key, key_type, created_at, expires_at) VALUES (?, ?, ?, ?)",
-                (key, key_type, now, expires)
+                "INSERT INTO licenses (key, key_type, created_at, expires_at, discord_id) VALUES (?, ?, ?, ?, ?)",
+                (key, key_type, now, expires, discord_id)
             )
             con.commit()
 
-        flash_html = f'<div class="flash flash-ok">Key generated: <strong>{key}</strong> &nbsp;·&nbsp; Type: {key_type} &nbsp;·&nbsp; Expires: {expires or "Never"}</div>'
+        flash_html = f"""
+        <div class="flash flash-ok">
+          Key generated: <strong>{key}</strong><br>
+          Type: {key_type} &nbsp;·&nbsp; Expires: {expires or "Never"} &nbsp;·&nbsp; Discord ID: {discord_id or "Not linked"}
+        </div>"""
 
     body = f"""
     <div class="page-header">
@@ -352,7 +504,7 @@ def generate():
     </div>
     {flash_html}
     <div class="form-card">
-      <form method="POST">
+      <form method="POST" action="/generate">
         <div class="form-row">
           <label>Key Type</label>
           <select name="key_type">
@@ -361,17 +513,24 @@ def generate():
             <option value="90days">90 Days</option>
           </select>
         </div>
+        <div class="form-row">
+          <label>Discord User ID (optional)</label>
+          <input type="text" name="discord_id" placeholder="Links key to a customer account">
+        </div>
         <button class="btn btn-primary" type="submit">Generate Key</button>
       </form>
     </div>"""
-    return page("Generate Key", body, "generate")
+    return wrap_page("Generate Key", body, active="generate")
 
 
+# ── ORDERS ────────────────────────────────────────────────────────────────────
 @app.route("/orders")
 @login_required
 def orders():
     with get_db() as con:
-        rows = con.execute("SELECT id, key, key_type, cost, created_at, notes FROM orders ORDER BY created_at DESC").fetchall()
+        rows = con.execute(
+            "SELECT id, key, key_type, cost, created_at, notes FROM orders ORDER BY created_at DESC"
+        ).fetchall()
 
     total     = sum(r[3] for r in rows) if rows else 0
     rows_html = ""
@@ -384,7 +543,7 @@ def orders():
           <td style="color:var(--muted)">{r[4]}</td>
           <td style="color:var(--muted);font-size:11px">{r[5] or '—'}</td>
           <td>
-            <form method="POST" action="/orders/delete" style="display:inline">
+            <form method="POST" action="/orders/delete">
               <input type="hidden" name="id" value="{r[0]}">
               <button class="btn btn-danger" onclick="return confirm('Delete this order?')">Delete</button>
             </form>
@@ -402,7 +561,7 @@ def orders():
       <tr><th>#</th><th>Key</th><th>Type</th><th>Cost</th><th>Date</th><th>Info</th><th></th></tr>
       {rows_html}
     </table></div>"""
-    return page("Orders", body, "orders")
+    return wrap_page("Orders", body, active="orders")
 
 
 @app.route("/orders/delete", methods=["POST"])
@@ -425,7 +584,6 @@ def new_order():
         cost     = float(request.form.get("cost") or 0)
         notes    = request.form.get("notes", "").strip()
         now      = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
         with get_db() as con:
             con.execute(
                 "INSERT INTO orders (key, key_type, cost, created_at, notes) VALUES (?, ?, ?, ?, ?)",
@@ -435,7 +593,9 @@ def new_order():
         flash_html = '<div class="flash flash-ok">Order recorded successfully.</div>'
 
     with get_db() as con:
-        all_keys = con.execute("SELECT key, key_type FROM licenses ORDER BY created_at DESC").fetchall()
+        all_keys = con.execute(
+            "SELECT key, key_type FROM licenses ORDER BY created_at DESC"
+        ).fetchall()
 
     key_options = '<option value="">— Select a key —</option>'
     for k in all_keys:
@@ -447,7 +607,7 @@ def new_order():
     </div>
     {flash_html}
     <div class="form-card">
-      <form method="POST">
+      <form method="POST" action="/orders/new">
         <div class="form-row">
           <label>License Key (optional)</label>
           <select name="key">{key_options}</select>
@@ -471,9 +631,10 @@ def new_order():
         <button class="btn btn-primary" type="submit">Record Order</button>
       </form>
     </div>"""
-    return page("New Order", body, "new_order")
+    return wrap_page("New Order", body, active="new_order")
 
 
+# ── VALIDATE API ──────────────────────────────────────────────────────────────
 @app.route("/validate", methods=["POST"])
 def validate():
     data = request.json or {}
@@ -511,4 +672,5 @@ def validate():
 if __name__ == "__main__":
     init_db()
     print("\n  Black Horizon License Panel → http://localhost:5000")
+    print("  Customer Portal            → http://localhost:5000/portal\n")
     app.run(host="0.0.0.0", port=5000, debug=True)
